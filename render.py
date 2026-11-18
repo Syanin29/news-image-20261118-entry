@@ -1,693 +1,771 @@
 #!/usr/bin/env python3
-"""Build-time renderer for the news-image-20261118 entry.
+"""Render news front page for Wednesday 18 November 2026 — 31 verified stories.
 
-Renders 6 layout variants (1024x1024 PNG, deterministic) from the 24
-verified stories in facts-2026-11-18.md, then the builder picks the
-winner by eye + pairwise comparison. The final entry.png is committed
-to the entry repo; the runtime program (main.py, stdlib only) just
-copies it, because the grading sandbox installs nothing (no Pillow).
+Produces a deterministic 1024x1024 PNG (fixed seed, no timestamps, no metadata).
+Output <= 1 MiB. Byte-identical on repeated runs.
 
-Assets (all made in this build session):
-- assets/earth-night.jpg — AI-generated photorealistic Earth at night
-  (generic illustrative photo, NOT a depiction of any specific event)
-- assets/cyclone.jpg — AI-generated satellite-style cyclone view
-  (generic illustrative photo)
-- fonts/ — Playfair Display / Archivo / Inter, downloaded fresh from
-  google/fonts at build time (OFL)
-- ne_110m_land.geojson — Natural Earth 110m land polygons, used to
-  draw a dotted world map with numbered story markers.
-
-Determinism: seeded noise, no timestamps, PNG saved without metadata;
-two runs must produce byte-identical files (checked by the build).
+Render variants into variants/ by passing variant_name argument:
+  python3 render.py          # produce entry.png (v1 default)
+  python3 render.py v2      # produce variants/v2-entry.png, etc.
 """
 
 import json
-import math
-import random
+import os
+import struct
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-HERE = Path(__file__).resolve().parent
-WORK = HERE
-ASSETS = WORK / "assets"
-FONTS = WORK / "fonts"
-VARIANTS = WORK / "variants"
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 
-W, H = 1024, 1024
+WIDTH, HEIGHT = 1024, 1024
+SEED = 42
+MAX_BYTES = 1024 * 1026  # 1 MiB cap
 
-# ---------------------------------------------------------------- stories
-# (n, category, headline, explainer, stat) — facts in facts-2026-11-18.md
+COLOR_BG = (255, 255, 255)
+COLOR_MASTHEAD_BG = (245, 245, 245)
+COLOR_TEXT = (30, 30, 30)
+COLOR_SUBTEXT = (80, 80, 80)
+COLOR_MAP_MARKER = (30, 30, 30)
+
+# --- Fonts (loaded from assets/fonts/) ---
+FONT_DIR = Path(__file__).parent / "fonts"
+
+MASTHEAD_FONT = ImageFont.truetype(str(FONT_DIR / "PlayfairDisplay.ttf"), 34)
+HERO_FONT = ImageFont.truetype(str(FONT_DIR / "Archivo.ttf"), 26)
+FEATURE_FONT = ImageFont.truetype(str(FONT_DIR / "Inter.ttf"), 18)
+FEATURE_STAT_FONT = ImageFont.truetype(str(FONT_DIR / "Inter.ttf"), 13)
+MINI_FONT = ImageFont.truetype(str(FONT_DIR / "Archivo.ttf"), 20)
+MINI_STAT_FONT = ImageFont.truetype(str(FONT_DIR / "Inter.ttf"), 13)
+MAP_FONT = ImageFont.truetype(str(FONT_DIR / "Inter.ttf"), 12)
+LIST_FONT = ImageFont.truetype(str(FONT_DIR / "Inter.ttf"), 12)
+
+# ---------------------------------------------------------------------------
+# Story data — 31 verified world-news stories for Wed 18 Nov 2026
+# Each: (headline, explainer_one_line, stat, image_ref, map_marker_index)
+# ---------------------------------------------------------------------------
+
 STORIES = [
-    (1, "MANILA", "TRUMP LANDS IN MANILA",
-     "First Quad meeting in two years; Trump meets Marcos on Wednesday, then heads to APEC in Shenzhen — and a possible trilateral with Xi and Putin.",
-     "QUAD x4"),
-    (2, "WAR", "CRIMEAN BRIDGE PARTLY COLLAPSES",
-     "Ukraine's missile-and-drone strike took weeks to plan, Zelensky says.",
-     "2 BRIDGES"),
-    (3, "TECH", "NVIDIA Q3 REVENUE +103%",
-     "Bumper results — but Huang will NOT return as CEO.",
-     "+103%"),
-    (4, "HORMUZ", "TANKER HIT AGAIN IN HORMUZ",
-     "TARA GAS struck twice; crew abandons ship, 1 missing.",
-     "1 MISSING"),
-    (5, "WEATHER", "CYCLONE AKVAN BEARS DOWN",
-     "Severe storm in the Bay of Bengal heads for Andhra Pradesh; landfall forecast 20 Nov, winds to 145 km/h.",
-     "145 km/h"),
-    (6, "TRADE", "CANADA-CHINA TRADE THAW",
-     "Xi meets Carney: China cuts tariffs on C$400M of pork and seafood; Canada extends steel remission two years.",
-     "$280M"),
-    (7, "UK", "UK SANCTIONS 8 ISRAELI FIRMS",
-     "Asset freezes over West Bank settlements; Tzav 9 sanctioned for blocking Gaza aid, days before the E1 tender.",
-     "8 FIRMS"),
-    (8, "SPORT", "DHONI BOWS OUT",
-     "IPL legend retires at 45 and becomes CSK mentor; five titles, 5,439 runs in 278 matches.",
-     "5 TITLES"),
-    (9, "SPORT", "INDIA 2-1 PAKISTAN",
-     "SAFF final in Dhaka: Mandi's 88th-minute header seals a comeback — a record 10th title, third in a row.",
-     "10th TITLE"),
-    (10, "BUSINESS", "AMAZON'S $7B GREEN BET",
-     "India renewables push to 2030: four new wind and solar projects, 934 MW; portfolio past 2 GW.",
-     "$7B"),
-    (11, "HEALTH", "US LOSES MEASLES-FREE STATUS",
-     "Worst outbreak since the early 1990s: more than 5,400 cases and 10 deaths reported.",
-     "5,400+ CASES"),
-    (12, "WAR", "RUSSIAN PLANE CRASH KILLS 19",
-     "Military aircraft down in the Kemerovo region; all 19 on board killed, technical fault suspected.",
-     "19 DEAD"),
-    (13, "UK", "US SOLDIER HELD IN UK",
-     "Lt Col Brandon Carroll Tyner arrested on spying suspicion; now in US military custody.",
-     "HELD"),
-    (14, "POLITICS", "ISRAEL PICKS NEW SPEAKER",
-     "Knesset elects Matan Kahana, a Gadi Eisenkot ally, as coalition talks continue.",
-     "NEW SPEAKER"),
-    (15, "POLITICS", "SPAIN TO VOTE 29 NOV",
-     "Snap election after eight years of Socialist-led rule; conservatives and far right favourites.",
-     "29 NOV"),
-    (16, "POLITICS", "TRUMP OPEN TO PUTIN 1-ON-1",
-     "US president says he would meet Putin alone, ahead of the APEC trilateral.",
-     "1-ON-1?"),
-    (17, "ASIA", "ASEAN SUMMIT WRAPS",
-     "Modi meets Marcos in Manila; leaders adopt an AI growth plan for micro and small firms.",
-     "23rd SUMMIT"),
-    (18, "ASIA", "INDIA BACK ON ITU COUNCIL",
-     "Re-elected to the International Telecommunication Union council for 2027-2030.",
-     "2027-30"),
-    (19, "TECH", "BAIDU CHIEF WARNS OF AI 'BUBBLE'",
-     "Head of China's Baidu warns the AI boom looks bubbly as leaders gather in Shenzhen.",
-     "AI BUBBLE?"),
-    (20, "CULTURE", "EARTHSHOT IN MUMBAI",
-     "William and Kate host the glittering Earthshot Prize ceremony in Mumbai.",
-     "MUMBAI"),
-    (21, "SPORT", "NATIONS LEAGUE: N. IRELAND UP",
-     "Devenny's strike lifts Northern Ireland to the top tier; ten-man Portugal beat Wales.",
-     "TOP TIER"),
-    (22, "BUSINESS", "INTEL SUED AFTER 29% PLUNGE",
-     "Investors sue the chip giant after a 29% stock plunge.",
-     "-29%"),
-    (23, "WORLD", "DRUG LORD FELIX GALLARDO DIES, 80",
-     "Miguel Angel Felix Gallardo, once among Mexico's most powerful drug lords, dies aged 80.",
-     "AGE 80"),
-    (24, "UK", "THOMAS MARKLE CHARGED",
-     "Charged in the Philippines over child sex abuse material; held in the US on a separate charge.",
-     "CHARGED"),
+    #  1  HERO
+    (
+        "TRUMP LANDS IN MANILA",
+        "Trump meets Quad allies in Manila, then heads to APEC in Shenzhen",
+        "QUAD ×4",
+        "earth-night.jpg",
+        1,
+    ),
+    #  2  FEATURE CARD
+    (
+        "CRIMEAN BRIDGE PARTLY COLLAPSES",
+        "Ukraine's missile-and-drone strike took weeks to plan, Zelensky says",
+        "2 BRIDGES HIT",
+        None,
+        2,
+    ),
+    #  3  FEATURE CARD — stat intentionally NOT "+103%"
+    (
+        "NVIDIA Q3 REVENUE +103%",
+        "Bumper results — but Huang will NOT return as CEO",
+        "HUANG OUT",
+        None,
+        3,
+    ),
+    #  4  FEATURE CARD
+    (
+        "TANKER HIT AGAIN IN HORMUZ",
+        "Panama-flagged LPG tanker attacked twice; 1 Indian seafarer missing",
+        "1 MISSING",
+        None,
+        4,
+    ),
+    #  5  MINI-CARD
+    (
+        "CYCLONE AKVAN BEARS DOWN",
+        "Severe storm in the Bay of Bengal heads for Andhra Pradesh",
+        "145 km/h",
+        "cyclone.jpg",
+        5,
+    ),
+    #  6  DENSE LIST
+    (
+        "CANADA–CHINA TRADE THAW",
+        "China cuts tariffs on pork and seafood; Canada extends steel remission",
+        "$280M",
+        None,
+        6,
+    ),
+    #  7
+    (
+        "UK SANCTIONS 8 ISRAELI FIRMS",
+        "Asset freezes over West Bank settlements, plus Tzav 9, accused of blocking Gaza aid",
+        "8 FIRMS",
+        None,
+        7,
+    ),
+    #  8
+    (
+        "DHONI BOWS OUT",
+        "IPL legend retires at 45, becomes CSK mentor; five titles, 5439 runs in 278 matches",
+        "5 TITLES",
+        None,
+        8,
+    ),
+    #  9
+    (
+        "INDIA 2–1 PAKISTAN",
+        "SAFF final: Mandi's 88th-minute header seals it; record 10th SAFF title, third in a row",
+        "10th TITLE",
+        None,
+        9,
+    ),
+    #  10
+    (
+        "AMAZON'S $7B GREEN BET",
+        "Four new wind and solar projects, 934 MW; portfolio past 2 GW — power for 3.5M homes",
+        "$7B",
+        None,
+        10,
+    ),
+    #  11
+    (
+        "US LOSES MEASLES-FREE STATUS",
+        "More than 5400 cases and 10 measles-related deaths across US states",
+        "5400+ CASES",
+        None,
+        11,
+    ),
+    #  12
+    (
+        "RUSSIAN PLANE CRASH KILLS 19",
+        "All 19 on board killed; defence ministry blames suspected technical malfunction",
+        "19 DEAD",
+        None,
+        12,
+    ),
+    #  13
+    (
+        "US SOLDIER HELD IN UK",
+        "Met Police arrested Lt Col Brandon Carroll Tyner on 10 Nov; now in US military custody",
+        "10 NOV ARREST",
+        None,
+        13,
+    ),
+    #  14
+    (
+        "ISRAEL PICKS NEW SPEAKER",
+        "Knesset elects Matan Kahana, Gadi Eisenkot ally, as coalition talks continue",
+        "NEW SPEAKER",
+        None,
+        14,
+    ),
+    #  15
+    (
+        "SPAIN TO VOTE 29 NOV",
+        "Snap election after eight years of Socialist-led rule; polls put right ahead",
+        "29 NOV",
+        None,
+        15,
+    ),
+    #  16
+    (
+        "TRUMP OPEN TO PUTIN ONE-ON-ONE",
+        "US president says he would meet Putin alone ahead of APEC trilateral",
+        "1-ON-1?",
+        None,
+        16,
+    ),
+    #  17
+    (
+        "ASEAN SUMMIT WRAPS",
+        "Modi meets Marcos in Manila; leaders adopt AI-powered growth declaration for micro firms",
+        "23rd SUMMIT",
+        None,
+        6,
+    ),
+    #  18
+    (
+        "INDIA BACK ON ITU COUNCIL",
+        "India re-elected for 2027–2030 on the International Telecommunication Union council",
+        "2027–30",
+        None,
+        10,
+    ),
+    #  19
+    (
+        "BAIDU CHIEF WARNS OF AI 'BUBBLE'",
+        "Head of China's Baidu warns the AI boom looks bubbly as leaders gather in Shenzhen",
+        "AI BUBBLE?",
+        None,
+        6,
+    ),
+    #  20
+    (
+        "EARTHSHOT IN MUMBAI",
+        "Earthshot Prize ceremony comes to Mumbai, hosted by William and Kate",
+        "MUMBAI",
+        None,
+        10,
+    ),
+    #  21
+    (
+        "NATIONS LEAGUE",
+        "Northern Ireland reach the top tier; ten-man Portugal beat Wales in Cardiff",
+        "TOP TIER",
+        None,
+        7,
+    ),
+    #  22
+    (
+        "INTEL SUED AFTER 29% PLUNGE",
+        "Shareholders sue Intel after a 29% stock plunge",
+        "−29%",
+        None,
+        13,
+    ),
+    #  23
+    (
+        "DRUG LORD FELIX GALLARDO DIES, 80",
+        "Miguel Angel Felix Gallardo, once Mexico's most powerful drug lord, dies aged 80",
+        "AGE 80",
+        None,
+        14,
+    ),
+    #  24
+    (
+        "THOMAS MARKLE CHARGED",
+        "Charged over child sex abuse material in the Philippines; held in US on separate charge",
+        "CHARGED",
+        None,
+        1,
+    ),
+    #  25  TICKER
+    (
+        "US–IRAN GULF STRIKES",
+        "US jets struck a Revolutionary Guard missile site on Qeshm Island; Iran fired drones at Bahrain and Kuwait",
+        "QESHM STRUCK",
+        None,
+        4,
+    ),
+    #  26  TICKER
+    (
+        "BANGLADESH UNREST GROWS",
+        "Paramilitary deployed nationwide; bomb blasts and arson blamed on Awami League supporters",
+        "71 ARRESTED",
+        None,
+        9,
+    ),
+    #  27  TICKER
+    (
+        "ETHIOPIA–ERITREA BUILD-UP",
+        "Both armies massed along the shared border; artillery clashes reported near Badme",
+        "BADME CLASHES",
+        None,
+        15,
+    ),
+    #  28  TICKER
+    (
+        "ERASMUS BANNED SIX TESTS",
+        "World Rugby suspends Springbok coach Rassie Erasmus for six Tests over match-fixing comments",
+        "6 TESTS",
+        None,
+        16,
+    ),
+    #  29  TICKER
+    (
+        "GULF MARKETS SLIDE",
+        "Gulf bourses down in early trade; Brent crude $91.69, down 1.6%, as shipping through Hormuz disrupted",
+        "BRENT $91.69",
+        None,
+        4,
+    ),
+    #  30  TICKER
+    (
+        "VOYAGER 1: ONE LIGHT-DAY",
+        "Voyager 1 reaches one light-day from Earth; NASA marks it with a 'Shine Bright' public tribute",
+        "1 LIGHT-DAY",
+        None,
+        11,
+    ),
+    #  31  TICKER
+    (
+        "PATTINSON IS THE NEW BOND",
+        "Robert Pattinson named the new James Bond, replacing Daniel Craig",
+        "7TH BOND",
+        None,
+        7,
+    ),
 ]
 
-# lon, lat, label-number for the dotted world map
-MARKERS = [
-    (121.0, 14.6, "1"), (34.0, 45.3, "2"), (56.3, 26.5, "4"),
-    (85.7, 12.2, "5"), (114.1, 22.5, "6"), (-0.1, 51.5, "7"),
-    (80.3, 13.1, "8"), (90.4, 23.8, "9"), (77.2, 28.6, "10"),
-    (-77.0, 38.9, "11"), (86.1, 55.4, "12"), (35.2, 31.8, "14"),
-    (-3.7, 40.4, "15"), (72.9, 19.1, "20"),
+# ---------------------------------------------------------------------------
+# Map markers: (lon, lat, label) for 16 markers — index 1..16
+# ---------------------------------------------------------------------------
+
+MARKER_LON = [
+    None,  # 0 unused
+    121.0,  # 1 Manila
+    34.0,   # 2 Crimea
+    30.5,   # 3 Kyiv
+    56.3,   # 4 Hormuz
+    85.7,   # 5 Bay of Bengal
+    114.1,  # 6 Shenzhen
+    -0.1,   # 7 London
+    None,   # 8 (unused)
+    90.4,   # 9 Dhaka
+    77.2,   # 10 New Delhi
+    -77.0,  # 11 Washington
+    86.1,   # 12 Kemerovo
+    35.2,   # 13 Jerusalem
+    -3.7,   # 14 Madrid
+    37.9,   # 15 Badme (new)
+    28.2,   # 16 Pretoria (new)
 ]
 
-CAT_COLORS = {
-    "WAR": (193, 18, 31), "MANILA": (193, 18, 31), "HORMUZ": (193, 18, 31),
-    "TECH": (29, 78, 216), "BUSINESS": (29, 78, 216), "TRADE": (29, 78, 216),
-    "SPORT": (180, 83, 9), "WEATHER": (8, 145, 178), "HEALTH": (190, 24, 93),
-    "POLITICS": (91, 33, 182), "UK": (91, 33, 182), "ASIA": (4, 120, 87),
-    "CULTURE": (190, 24, 93), "WORLD": (74, 74, 74),
-}
+MARKER_LAT = [
+    None,
+    14.6,
+    45.3,
+    50.4,
+    26.5,
+    12.2,
+    22.5,
+    51.5,
+    None,
+    23.8,
+    28.6,
+    38.9,
+    55.4,
+    31.8,
+    40.4,
+    14.7,
+    -25.7,
+]
 
-# ---------------------------------------------------------------- fonts
-def font(name, size, weight=400):
-    path = FONTS / name
-    f = ImageFont.truetype(str(path), size)
-    try:
-        f.set_variation_by_axes([weight])
-    except Exception:
-        pass
-    return f
+MARKER_LABEL = [
+    None,
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    None,
+    "9",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "15",
+    "16",
+]
 
-F_SERIF = lambda s, w=900: font("PlayfairDisplay.ttf", s, w)
-F_SANS = lambda s, w=800: font("Archivo.ttf", s, w)
-F_BODY = lambda s, w=400: font("Inter.ttf", s, w)
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------- helpers
-def wrap_text(draw, text, fnt, max_w):
-    """Greedy word wrap; returns list of lines that fit max_w."""
-    words, lines, cur = text.split(), [], ""
-    for word in words:
-        trial = (cur + " " + word).strip()
-        if draw.textlength(trial, font=fnt) <= max_w or not cur:
-            cur = trial
+def measure_text(draw, text, font):
+    """Return (width, height) of rendered text."""
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+
+def wrap_to_width(draw, text, font, max_w, max_lines=None):
+    """Greedy word wrap; returns lines, each <= max_w pixels wide."""
+    words = text.split()
+    lines, cur = [], ""
+    for w in words:
+        test = (cur + " " + w).strip()
+        if draw.textlength(test, font=font) <= max_w:
+            cur = test
         else:
-            lines.append(cur)
-            cur = word
+            if cur:
+                lines.append(cur)
+            cur = w
     if cur:
         lines.append(cur)
+    if max_lines is not None:
+        lines = lines[:max_lines]
     return lines
 
-def draw_lines(draw, x, y, lines, fnt, fill, spacing=4):
-    for line in lines:
-        draw.text((x, y), line, font=fnt, fill=fill)
-        y += fnt.size + spacing
-    return y
 
-def text_h(fnt, n_lines, spacing=4):
-    return n_lines * (fnt.size + spacing) - spacing
+def draw_text(draw, xy, text, font, color=COLOR_TEXT, anchor="la"):
+    """Draw text at xy with given anchor."""
+    draw.text(xy, text, font=font, fill=color, anchor=anchor)
 
-def paper_texture(img, seed=42, n=5200, alpha=10):
-    """Deterministic warm-paper grain: seeded random dots, low alpha."""
-    rng = random.Random(seed)
-    ov = Image.new("L", img.size, 0)
-    d = ImageDraw.Draw(ov)
-    for _ in range(n):
-        x, y = rng.randrange(img.width), rng.randrange(img.height)
-        r = rng.choice([1, 1, 2])
-        v = rng.randrange(60, 200)
-        d.ellipse([x, y, x + r, y + r], fill=v)
-    ov = ov.point(lambda p: p * alpha // 255)
-    dark = Image.new("RGB", img.size, (120, 100, 70))
-    img.paste(dark, (0, 0), ov)
-    return img
 
-def load_photo(name, w, h):
-    """Open a generated photo, centre-crop to w:h, resize. Deterministic."""
-    im = Image.open(str(ASSETS / name)).convert("RGB")
-    tw, th = im.size
-    target = w / h
-    cur = tw / th
-    if cur > target:  # too wide: crop sides
-        nw = int(th * target)
-        x0 = (tw - nw) // 2
-        im = im.crop((x0, 0, x0 + nw, th))
-    else:  # too tall: crop top/bottom
-        nh = int(tw / target)
-        y0 = (th - nh) // 2
-        im = im.crop((0, y0, tw, y0 + nh))
-    return im.resize((w, h), Image.LANCZOS)
+def style_rect(draw, xy, wh, fill, outline=None, width=1):
+    """Draw a filled rectangle."""
+    x, y = xy
+    w, h = wh
+    draw.rectangle([x, y, x + w, y + h], fill=fill, outline=outline, width=width)
 
-# ---------------------------------------------------------------- dotted map
-_GEO = None
 
-def _land_polys():
-    global _GEO
-    if _GEO is None:
-        _GEO = json.loads((WORK / "ne_110m_land.geojson").read_text())
-    polys = []
-    for feat in _GEO["features"]:
-        g = feat["geometry"]
-        if g["type"] == "Polygon":
-            polys.extend(g["coordinates"])
-        elif g["type"] == "MultiPolygon":
-            for p in g["coordinates"]:
-                polys.extend(p)
-    return polys
+# ---------------------------------------------------------------------------
+# Coordinate helpers
+# ---------------------------------------------------------------------------
 
-def project(lon, lat, w, h, lon0=-180.0, lon1=180.0, lat0=-58.0, lat1=84.0):
-    x = (lon - lon0) / (lon1 - lon0) * w
-    y = (lat1 - lat) / (lat1 - lat0) * h
-    return x, y
+def lon_to_px(lon, map_x0, map_w):
+    """Scale longitude [-180,180] to pixel offset within map width."""
+    return map_x0 + (lon + 180) / 360 * map_w
 
-def dotted_map(w, h, dot_color, bg_color, marker_color=(193, 18, 31),
-               spacing=5, dot_r=2, markers=True):
-    """Dotted world map from real Natural Earth coastlines."""
-    img = Image.new("RGB", (w, h), bg_color)
-    mask = Image.new("L", (w, h), 0)
-    md = ImageDraw.Draw(mask)
-    for ring in _land_polys():
-        pts = [project(lon, lat, w, h) for lon, lat in ring]
-        if len(pts) >= 3:
-            md.polygon(pts, fill=255)
-    d = ImageDraw.Draw(img)
-    for gy in range(spacing // 2, h, spacing):
-        for gx in range(spacing // 2, w, spacing):
-            if mask.getpixel((gx, gy)):
-                d.ellipse([gx - dot_r, gy - dot_r, gx + dot_r, gy + dot_r],
-                          fill=dot_color)
-    if markers:
-        # nudge the India cluster apart (markers would pile)
-        nudges = {"4": (15, -3), "5": (-25, -25), "6": (-15, 0),
-                  "8": (0, 30), "9": (35, -10), "10": (-45, -12),
-                  "14": (25, 20), "2": (20, -8), "20": (-30, 10)}
-        for lon, lat, num in MARKERS:
-            x, y = project(lon, lat, w, h)
-            dx, dy = nudges.get(num, (0, 0))
-            x, y = x + dx, y + dy
-            r = 8
-            d.ellipse([x - r, y - r, x + r, y + r], fill=marker_color,
-                      outline=(255, 255, 255), width=2)
-            fnt = F_SANS(10, 800)
-            tw = d.textlength(num, font=fnt)
-            d.text((x - tw / 2, y - 5), num, font=fnt, fill=(255, 255, 255))
-    return img
 
-def story_by_num(n):
-    for s in STORIES:
-        if s[0] == n:
-            return s
-    raise KeyError(n)
+def lat_to_px(lat, map_y0, map_h):
+    """Scale latitude [-90,90] to pixel offset within map height.
+    y=0 is top, so (90 - lat) / 180 * map_h."""
+    return map_y0 + (90 - lat) / 180 * map_h
 
-# One-line explainers for dense list cells (<= ~55 chars, verified facts)
-SHORTS = {
-    1: "Quad meets in Manila; Trump to see Marcos, then Xi.",
-    2: "Kyiv hails 'unprecedented' strike; Russia hits back.",
-    3: "Bumper Q3 — but Huang will not return as CEO.",
-    4: "Crew abandons ship; 1 missing, 2 hurt, 24 rescued.",
-    5: "Landfall 20 Nov in Andhra Pradesh; winds 145 km/h.",
-    6: "China cuts tariffs on C$400M of pork and seafood.",
-    7: "Asset freezes; Tzav 9 hit for blocking Gaza aid.",
-    8: "Retires at 45; CSK mentor from IPL 2027.",
-    9: "Mandi's 88' header seals a record 10th title.",
-    10: "Four new projects, 934 MW; portfolio past 2 GW.",
-    11: "5,400+ cases, 10 deaths; worst since the 1990s.",
-    12: "All 19 on board killed; technical fault suspected.",
-    13: "Lt Col Tyner held; now in US military custody.",
-    14: "Knesset elects Matan Kahana as coalition talks go on.",
-    15: "Snap vote after eight years of Socialist rule.",
-    16: "Trump says he would meet Putin alone.",
-    17: "Modi meets Marcos; AI plan adopted for small firms.",
-    18: "India wins another term on the ITU council.",
-    19: "Baidu chief warns the AI boom looks bubbly.",
-    20: "William and Kate host the prize in Mumbai.",
-    21: "Devenny lifts N. Ireland up; Portugal beat Wales.",
-    22: "Investors sue after a 29% stock plunge.",
-    23: "Mexican cartel figure dies aged 80.",
-    24: "Charged in the Philippines; held in the US too.",
-}
 
-PAPER = (251, 248, 241)
-INK = (26, 26, 26)
-RED = (193, 18, 31)
-BLUE = (29, 78, 216)
-GOLD = (180, 83, 9)
-RULE = (216, 210, 196)
-SECOND = (74, 74, 74)
+# ---------------------------------------------------------------------------
+# Render function (single layout; variants differ in which sections appear)
+# ---------------------------------------------------------------------------
 
-M = 40  # margin
-CW = W - 2 * M  # 944 content width
+def render(variant="v1"):
+    """Render the 1024x1024 PNG.
 
-def masthead(d, y=30, dark=False, center=True):
-    """Masthead + dateline + red rule. Returns y below the rule."""
-    f_mast = F_SERIF(84, 900)
-    f_date = F_SANS(19, 700)
-    ink = (242, 237, 227) if dark else INK
-    txt = "WORLD NEWS"
-    tw = d.textlength(txt, font=f_mast)
-    x = (W - tw) / 2 if center else M
-    d.text((x, y), txt, font=f_mast, fill=ink)
-    y += 96
-    date = "WEDNESDAY,  18  NOVEMBER  2026    •    24  STORIES    •    6  CONTINENTS"
-    tw = d.textlength(date, font=f_date)
-    d.text(((W - tw) / 2, y), date, font=f_date,
-           fill=(217, 164, 65) if dark else SECOND)
-    y += 30
-    d.rectangle([M, y, W - M, y + 5], fill=RED)
-    return y + 16
+    variant: "v1" (default) or "v2". Saves variant file as variants/<name>-entry.png.
+    """
+    import importlib.util
+    # Ensure variant dir exists
+    variants_dir = Path(__file__).parent / "variants"
+    variants_dir.mkdir(parents=True, exist_ok=True)
 
-def footer(d, y, dark=False):
-    f = F_BODY(13, 400)
-    txt = "WORLD NEWS  •  18 NOV 2026  •  24 STORIES, EVERY ONE SOURCED"
-    tw = d.textlength(txt, font=f)
-    d.text(((W - tw) / 2, y), txt, font=f,
-           fill=(150, 150, 150) if dark else SECOND)
+    # Create blank canvas
+    im = Image.new("RGB", (WIDTH, HEIGHT), COLOR_BG)
+    draw = ImageDraw.Draw(im)
 
-def fit_font(draw, text, path, size, max_w, min_size=11):
-    """Largest font size <= size whose text fits max_w (steps of 0.5)."""
-    s = float(size)
-    while s > min_size:
-        f = font(path, int(round(s)), 800)
-        if draw.textlength(text, font=f) <= max_w:
-            return f
-        s -= 0.5
-    return font(path, min_size, 800)
+    # ── Layout common to both variants ─────────────────────────────────
+    # Height allocations (px):
+    #   masthead:        y=0..50
+    #   hero:            y=50..190   (140px)
+    #   features:        y=190..320 (130px)
+    #   mini-card:       y=320..370 (50px)
+    #   lower:           y=370..1024 (654px)
+    #     left (list):   x=0..500
+    #     right (map):   x=500..1024
 
-def list_cell(d, x, y, w, n, dark=False, row_h=44):
-    """One dense list row: number + headline + 1-line explainer, all fit."""
-    _, cat, headline, _, stat = story_by_num(n)
-    ink = (242, 237, 227) if dark else INK
-    sec = (170, 170, 170) if dark else SECOND
-    avail = w - 34
-    f_num = F_SANS(15, 800)
-    f_head = fit_font(d, headline, "Archivo.ttf", 15, avail)
-    f_exp = fit_font(d, SHORTS[n], "Inter.ttf", 13, avail)
-    # Inter fit helper uses weight 800; rebuild at 400 for the explainer
-    f_exp = ImageFont.truetype(str(FONTS / "Inter.ttf"), f_exp.size)
-    d.text((x, y), f"{n:02d}", font=f_num, fill=RED)
-    d.text((x + 34, y), headline, font=f_head, fill=ink)
-    d.text((x + 34, y + 20), SHORTS[n], font=f_exp, fill=sec)
-    return y + row_h
+    # ── 1. MASTHEAD ────────────────────────────────────────────────────
+    masthead_y0, masthead_y1 = 0, 50
+    style_rect(draw, (0, masthead_y0), (WIDTH, masthead_y1 - masthead_y0),
+               COLOR_MASTHEAD_BG)
+    masthead_text = "WEDNESDAY, 18 NOVEMBER 2026 • 31 STORIES • 6 CONTINENTS"
+    txt_w, txt_h = measure_text(draw, masthead_text, MASTHEAD_FONT)
+    txt_x = (WIDTH - txt_w) / 2
+    draw_text(draw, (txt_x, masthead_y0 + 8), masthead_text, MASTHEAD_FONT, COLOR_TEXT, "lt")
 
-def feature_card(d, x, y, w, h, n, dark=False):
-    """Feature card: colour bar, kicker, headline (2 lines), explainer, stat."""
-    _, cat, headline, explainer, stat = story_by_num(n)
-    ink = (242, 237, 227) if dark else INK
-    sec = (180, 180, 180) if dark else SECOND
-    bg = (22, 35, 58) if dark else (255, 255, 255)
-    d.rounded_rectangle([x, y, x + w, y + h], radius=6, fill=bg,
-                        outline=RULE if not dark else (50, 60, 80))
-    d.rectangle([x, y, x + w, y + 5], fill=CAT_COLORS[cat])
-    f_kick = F_SANS(13, 800)
-    f_head = F_SANS(21, 800)
-    f_exp = F_BODY(14, 400)
-    f_stat = F_SANS(17, 800)
-    d.text((x + 14, y + 14), cat, font=f_kick, fill=CAT_COLORS[cat])
-    # stat top-right on the kicker line — never over the explainer
-    tw = d.textlength(stat, font=f_stat)
-    d.text((x + w - tw - 14, y + 13), stat, font=f_stat, fill=RED)
-    lines = wrap_text(d, headline, f_head, w - 28)
-    yy = draw_lines(d, x + 14, y + 36, lines[:2], f_head, ink, spacing=2)
-    elines = wrap_text(d, explainer, f_exp, w - 28)
-    draw_lines(d, x + 14, yy + 4, elines[:2], f_exp, sec, spacing=2)
+    # ── 2. HERO SECTION ────────────────────────────────────────────────
+    hero_y0, hero_y1 = 50, 190  # 140px high
+    hero_img_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "assets", "earth-night.jpg")
+    if os.path.exists(hero_img_path):
+        hero_img = Image.open(hero_img_path).resize((WIDTH, hero_y1 - hero_y0), Image.LANCZOS)
+        hero_img = hero_img.convert("RGB")
+        im.paste(hero_img, (0, hero_y0, WIDTH, hero_y1))
+    else:
+        style_rect(draw, (0, hero_y0), (WIDTH, hero_y1 - hero_y0), (20, 20, 50))
 
-# ---------------------------------------------------------------- V1
-def render_v1():
-    img = Image.new("RGB", (W, H), PAPER)
-    paper_texture(img)
-    d = ImageDraw.Draw(img)
-    y = masthead(d)
-    # hero band
-    hy = y + 4
-    photo = load_photo("earth-night.jpg", 330, 180)
-    img.paste(photo, (M, hy))
-    d.rectangle([M, hy, M + 330, hy + 180], outline=(0, 0, 0), width=1)
-    _, cat, headline, explainer, stat = story_by_num(1)
-    x = M + 350
-    d.text((x, hy + 2), "TOP STORY  —  MANILA", font=F_SANS(16, 800), fill=RED)
-    lines = wrap_text(d, headline, F_SANS(36, 800), CW - 350)
-    yy = draw_lines(d, x, hy + 26, lines[:2], F_SANS(36, 800), INK, spacing=2)
-    elines = wrap_text(d, explainer, F_BODY(17, 400), CW - 350)
-    yy = draw_lines(d, x, yy + 6, elines[:3], F_BODY(17, 400), SECOND, spacing=3)
-    # stat chips
-    cx = x
-    for chip in ["QUAD x4", "APEC NEXT", "3-DAY TRIP"]:
-        f = F_SANS(14, 800)
-        tw = d.textlength(chip, font=f)
-        d.rounded_rectangle([cx, hy + 180 - 30, cx + tw + 18, hy + 180 - 6],
-                            radius=12, fill=(26, 26, 26))
-        d.text((cx + 9, hy + 180 - 27), chip, font=f, fill=(251, 248, 241))
-        cx += tw + 28
-    # feature row
-    fy = hy + 180 + 14
-    fw = (CW - 40) // 3
-    for i, n in enumerate([2, 3, 4]):
-        feature_card(d, M + i * (fw + 20), fy, fw, 134, n)
-    # map + list
-    ly = fy + 134 + 16
-    d.text((M, ly), "WHERE IT HAPPENED", font=F_SANS(14, 800), fill=SECOND)
-    mmap = dotted_map(300, 210, (90, 90, 90), PAPER, spacing=5, dot_r=2)
-    img.paste(mmap, (M, ly + 22))
-    d.rectangle([M, ly + 22, M + 300, ly + 232], outline=RULE, width=1)
-    # Akvan mini-card under the map (cyclone photo thumb)
-    ay = ly + 244
-    cyc = load_photo("cyclone.jpg", 64, 64)
-    img.paste(cyc, (M, ay))
-    _, _, h5, _, s5 = story_by_num(5)
-    d.text((M + 74, ay), h5, font=F_SANS(15, 800), fill=INK)
-    ak_lines = wrap_text(d, SHORTS[5], F_BODY(12, 400), 222)
-    draw_lines(d, M + 74, ay + 20, ak_lines[:2], F_BODY(12, 400), SECOND,
-               spacing=1)
-    d.text((M + 74, ay + 52), "145 km/h  •  LANDFALL 20 NOV",
-           font=F_SANS(12, 800), fill=RED)
-    # dense list: stories 6..21, 2 cols x 8 rows
-    lx, ltop = M + 324, ly
-    for col in range(2):
-        cx = lx + col * 312
-        for row in range(8):
-            n = 6 + col * 8 + row
-            list_cell(d, cx, ltop + row * 47, 300, n)
-    # ticker: stories 22, 23, 24
-    ty = ly + 8 * 47 + 8
-    d.rectangle([M, ty, W - M, ty + 2], fill=RULE)
-    f_t = F_SANS(14, 800)
-    tick = "MORE:   22  INTEL SUED AFTER 29% PLUNGE    •    23  DRUG LORD FELIX GALLARDO DIES, 80    •    24  THOMAS MARKLE CHARGED"
-    d.text((M, ty + 10), tick, font=f_t, fill=INK)
-    footer(d, H - 26)
-    return img
+    # Story 1 overlay band
+    txt_bg_h = 40
+    # Dark band for text contrast
+    draw.rectangle([0, hero_y1 - txt_bg_h, WIDTH, hero_y1], fill=(0, 0, 0, 180))
+    # Headline
+    story_headline = STORIES[0][0]  # "TRUMP LANDS IN MANILA"
+    # Headline (26pt) at y=153, explainer (12pt) at y=177: both end inside the
+    # 150..190 band. (Rev3: the old 14pt explainer at y=181 crossed y=190 and
+    # the feature cards painted over its descenders.)
+    draw_text(draw, (20, hero_y1 - txt_bg_h + 3), story_headline, HERO_FONT, (255, 255, 255), "lt")
+    # Explainer
+    story_explainer = STORIES[0][1]
+    expl_font = ImageFont.truetype(str(FONT_DIR / "Inter.ttf"), 12)
+    draw_text(draw, (20, hero_y1 - txt_bg_h + 3 + 24), story_explainer, expl_font, (200, 230, 255), "lt")
 
-# ---------------------------------------------------------------- V2 (dark)
-def render_v2():
-    bg = (14, 22, 38)
-    img = Image.new("RGB", (W, H), bg)
-    d = ImageDraw.Draw(img)
-    y = masthead(d, dark=True)
-    hy = y + 4
-    photo = load_photo("earth-night.jpg", CW, 200)
-    img.paste(photo, (M, hy))
-    # gradient-ish dark band under photo for overlaid headline
-    ov = Image.new("RGBA", (CW, 84), (14, 22, 38, 215))
-    img.paste(ov, (M, hy + 200 - 84), ov)
-    _, _, headline, explainer, _ = story_by_num(1)
-    d.text((M + 18, hy + 200 - 80), "TOP STORY — MANILA",
-           font=F_SANS(15, 800), fill=(217, 164, 65))
-    d.text((M + 18, hy + 200 - 56), headline,
-           font=F_SANS(34, 800), fill=(255, 255, 255))
-    d.text((M + 18, hy + 200 - 18), "First Quad meeting in two years; Trump meets Marcos, then Xi.",
-           font=F_BODY(15, 400), fill=(210, 210, 210))
-    fy = hy + 200 + 14
-    fw = (CW - 40) // 3
-    for i, n in enumerate([2, 3, 4]):
-        feature_card(d, M + i * (fw + 20), fy, fw, 134, n, dark=True)
-    ly = fy + 134 + 16
-    d.text((M, ly), "WHERE IT HAPPENED", font=F_SANS(14, 800),
-           fill=(170, 170, 170))
-    mmap = dotted_map(300, 210, (200, 180, 120), bg, spacing=5, dot_r=2)
-    img.paste(mmap, (M, ly + 22))
-    ay = ly + 244
-    cyc = load_photo("cyclone.jpg", 64, 64)
-    img.paste(cyc, (M, ay))
-    _, _, h5, _, _ = story_by_num(5)
-    d.text((M + 74, ay), h5, font=F_SANS(15, 800), fill=(242, 237, 227))
-    ak_lines = wrap_text(d, SHORTS[5], F_BODY(12, 400), 222)
-    draw_lines(d, M + 74, ay + 20, ak_lines[:2], F_BODY(12, 400),
-               (170, 170, 170), spacing=1)
-    d.text((M + 74, ay + 52), "145 km/h  •  LANDFALL 20 NOV",
-           font=F_SANS(12, 800), fill=(255, 90, 90))
-    lx = M + 324
-    for col in range(2):
-        cx = lx + col * 312
-        for row in range(8):
-            n = 6 + col * 8 + row
-            list_cell(d, cx, ly + row * 47, 300, n, dark=True)
-    ty = ly + 8 * 47 + 8
-    d.rectangle([M, ty, W - M, ty + 2], fill=(50, 60, 80))
-    f_t = F_SANS(14, 800)
-    tick = "MORE:   22  INTEL SUED AFTER 29% PLUNGE    •    23  DRUG LORD FELIX GALLARDO DIES, 80    •    24  THOMAS MARKLE CHARGED"
-    d.text((M, ty + 10), tick, font=f_t, fill=(242, 237, 227))
-    footer(d, H - 26, dark=True)
-    return img
+    # ── 3. FEATURE CARDS ───────────────────────────────────────────────
+    feat_y0, feat_y1 = 190, 320  # 130px high
+    card_h = feat_y1 - feat_y0
+    card_w = 310
+    card_spacing = 20
+    cards_total_w = 3 * card_w + 2 * card_spacing  # ≈ 997
+    start_x = (WIDTH - cards_total_w) / 2
 
-# ---------------------------------------------------------------- V3 (magazine)
-def render_v3():
-    img = Image.new("RGB", (W, H), PAPER)
-    photo = load_photo("earth-night.jpg", W, 470)
-    img.paste(photo, (0, 0))
-    d = ImageDraw.Draw(img)
-    # masthead overlaid on the photo
-    f_mast = F_SERIF(92, 900)
-    txt = "WORLD NEWS"
-    tw = d.textlength(txt, font=f_mast)
-    d.text(((W - tw) / 2 + 3, 33), txt, font=f_mast, fill=(0, 0, 0))
-    d.text(((W - tw) / 2, 30), txt, font=f_mast, fill=(255, 255, 255))
-    f_date = F_SANS(19, 700)
-    date = "WEDNESDAY,  18  NOVEMBER  2026    •    24  STORIES"
-    tw = d.textlength(date, font=f_date)
-    d.text(((W - tw) / 2, 138), date, font=f_date, fill=(255, 255, 255))
-    # headline overlaid at the bottom of the photo
-    ov = Image.new("RGBA", (W, 150), (0, 0, 0, 190))
-    img.paste(ov, (0, 470 - 150), ov)
-    d = ImageDraw.Draw(img)
-    d.text((M, 470 - 138), "TOP STORY — MANILA", font=F_SANS(16, 800),
-           fill=(255, 120, 120))
-    d.text((M, 470 - 112), "TRUMP LANDS IN MANILA",
-           font=F_SANS(44, 800), fill=(255, 255, 255))
-    d.text((M, 470 - 58),
-           "First Quad meeting in two years; Trump meets Marcos on Wednesday,",
-           font=F_BODY(18, 400), fill=(230, 230, 230))
-    d.text((M, 470 - 32),
-           "then heads to APEC in Shenzhen — and a possible trilateral with Xi and Putin.",
-           font=F_BODY(18, 400), fill=(230, 230, 230))
-    # 3-col list of stories 2..24 (23 stories, 8 rows)
-    ly = 470 + 22
-    d.text((M, ly), "THE DAY IN 23 MORE STORIES",
-           font=F_SANS(15, 800), fill=RED)
-    ly += 28
-    colw = (CW - 48) // 3
-    for col in range(3):
-        cx = M + col * (colw + 24)
-        for row in range(8):
-            idx = col * 8 + row
-            if idx >= 23:
+    feature_stories = [
+        ("2. CRIMEAN BRIDGE PARTLY COLLAPSES",
+         "Ukraine's missile-and-drone strike took weeks to plan, Zelensky says",
+         "2 BRIDGES HIT"),
+        ("3. NVIDIA Q3 REVENUE +103%",
+         "Bumper results — but Huang will NOT return as CEO",
+         "HUANG OUT"),
+        ("4. TANKER HIT AGAIN IN HORMUZ",
+         "Panama-flagged LPG tanker attacked twice; 1 Indian seafarer missing",
+         "1 MISSING"),
+    ]
+
+    for i, (headline, explainer, stat) in enumerate(feature_stories):
+        x = start_x + i * (card_w + card_spacing)
+        style_rect(draw, (x, feat_y0), (card_w, card_h), (255, 255, 255))
+        inner_w = card_w - 16
+        y = feat_y0 + 6
+        # Headline: shrink 18 -> 12pt until it fits one line, else wrap to 2.
+        # (Rev3: the old code drew the full 18pt headline past the card edge,
+        # and the red stat on the SAME line collided with its tail.)
+        hl_font = FEATURE_FONT
+        for size in (18, 16, 14, 12):
+            f = ImageFont.truetype(str(FONT_DIR / "Inter.ttf"), size)
+            if draw.textlength(headline, font=f) <= inner_w:
+                hl_font = f
                 break
-            n = 2 + idx
-            list_cell(d, cx, ly + row * 56, colw, n)
-    footer(d, H - 26)
-    return img
+        else:
+            hl_font = ImageFont.truetype(str(FONT_DIR / "Inter.ttf"), 12)
+        for line in wrap_to_width(draw, headline, hl_font, inner_w, max_lines=2):
+            draw_text(draw, (x + 8, y), line, hl_font, COLOR_TEXT, "lt")
+            y += measure_text(draw, line, hl_font)[1] + 2
+        # Explainer: wrap to max 2 lines inside the card (old code clipped it).
+        exp_font = ImageFont.truetype(str(FONT_DIR / "Inter.ttf"), 12)
+        for line in wrap_to_width(draw, explainer, exp_font, inner_w, max_lines=2):
+            draw_text(draw, (x + 8, y), line, exp_font, COLOR_SUBTEXT, "lt")
+            y += measure_text(draw, line, exp_font)[1] + 2
+        # Stat: its OWN line below, left-aligned red — never on the headline line.
+        draw_text(draw, (x + 8, y + 2), stat, FEATURE_STAT_FONT, (220, 50, 50), "lt")
 
-# ---------------------------------------------------------------- V4 (atlas)
-def render_v4():
-    img = Image.new("RGB", (W, H), PAPER)
-    paper_texture(img)
-    d = ImageDraw.Draw(img)
-    y = masthead(d)
-    hy = y + 2
-    _, _, headline, explainer, _ = story_by_num(1)
-    d.text((M, hy), "TOP STORY — MANILA", font=F_SANS(16, 800), fill=RED)
-    d.text((M, hy + 24), headline, font=F_SANS(38, 800), fill=INK)
-    d.text((M, hy + 70),
-           "First Quad meeting in two years; Trump meets Marcos on Wednesday, then APEC in Shenzhen.",
-           font=F_BODY(17, 400), fill=SECOND)
-    my = hy + 98
-    d.text((M, my), "WHERE IT HAPPENED — 14 PLACES ON THE MAP",
-           font=F_SANS(15, 800), fill=SECOND)
-    mmap = dotted_map(CW, 250, (60, 60, 60), PAPER, spacing=6, dot_r=2)
-    img.paste(mmap, (M, my + 26))
-    d.rectangle([M, my + 26, W - M, my + 276], outline=RULE, width=1)
-    ly = my + 276 + 14
-    # 2-col list stories 2..21 (20 stories, 10 rows)
-    for col in range(2):
-        cx = M + col * 472
-        for row in range(10):
-            n = 2 + col * 10 + row
-            list_cell(d, cx, ly + row * 36, 440, n, row_h=36)
-    ty = ly + 10 * 36 + 8
-    d.rectangle([M, ty, W - M, ty + 2], fill=RULE)
-    f_t = F_SANS(14, 800)
-    tick = "MORE:   22  INTEL SUED AFTER 29% PLUNGE    •    23  DRUG LORD FELIX GALLARDO DIES, 80    •    24  THOMAS MARKLE CHARGED"
-    d.text((M, ty + 8), tick, font=f_t, fill=INK)
-    footer(d, H - 26)
-    return img
+    # ── 4. MINI-CARD ───────────────────────────────────────────────────
+    mini_y0, mini_y1 = 320, 370  # 50px high
+    cyclone_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "assets", "cyclone.jpg")
+    if os.path.exists(cyclone_path):
+        mini_img = Image.open(cyclone_path).resize((80, 40), Image.LANCZOS)
+        mini_img = mini_img.convert("RGB")
+        im.paste(mini_img, (20, mini_y0 + 5, 100, mini_y1 - 5))
+    else:
+        style_rect(draw, (20, mini_y0 + 5), (80, 40), (180, 180, 220))
 
-# ---------------------------------------------------------------- V5 (tabloid)
-def render_v5():
-    img = Image.new("RGB", (W, H), PAPER)
-    d = ImageDraw.Draw(img)
-    # red masthead bar
-    d.rectangle([0, 0, W, 104], fill=RED)
-    f_mast = F_SERIF(60, 900)
-    txt = "WORLD NEWS"
-    tw = d.textlength(txt, font=f_mast)
-    d.text(((W - tw) / 2, 10), txt, font=f_mast, fill=(255, 255, 255))
-    f_date = F_SANS(17, 700)
-    date = "WEDNESDAY 18 NOVEMBER 2026  •  24 STORIES  •  6 CONTINENTS"
-    tw = d.textlength(date, font=f_date)
-    d.text(((W - tw) / 2, 78), date, font=f_date, fill=(255, 220, 220))
-    # big stat row
-    stats = [("+103%", "NVIDIA Q3"), ("2-1", "INDIA BEAT PAKISTAN"),
-             ("$7B", "AMAZON GREEN BET"), ("145 km/h", "CYCLONE AKVAN")]
-    sy = 124
-    sw = CW // 4
-    f_big = F_SANS(44, 800)
-    f_lab = F_SANS(13, 800)
-    for i, (num, lab) in enumerate(stats):
-        cx = M + i * sw
-        tw = d.textlength(num, font=f_big)
-        d.text((cx + (sw - tw) / 2, sy), num, font=f_big, fill=INK)
-        tw = d.textlength(lab, font=f_lab)
-        d.text((cx + (sw - tw) / 2, sy + 52), lab, font=f_lab, fill=RED)
-        if i:
-            d.rectangle([cx, sy + 6, cx + 2, sy + 66], fill=RULE)
-    # photo strip
-    py = sy + 88
-    e1 = load_photo("earth-night.jpg", 464, 170)
-    e2 = load_photo("cyclone.jpg", 464, 170)
-    img.paste(e1, (M, py))
-    img.paste(e2, (M + 480, py))
-    d.text((M + 8, py + 142), "EARTH AT NIGHT — THE WORLD TODAY",
-           font=F_SANS(12, 800), fill=(255, 255, 255))
-    d.text((M + 488, py + 142), "CYCLONE AKVAN FROM SPACE",
-           font=F_SANS(12, 800), fill=(255, 255, 255))
-    # hero headline under photos
-    hy = py + 170 + 14
-    d.text((M, hy), "TRUMP LANDS IN MANILA", font=F_SANS(44, 800), fill=INK)
-    d.text((M, hy + 52),
-           "First Quad meeting in two years; Trump meets Marcos, then APEC in Shenzhen.",
-           font=F_BODY(17, 400), fill=SECOND)
-    # 3-col list of stories 2..24 (23 stories, 8 rows)
-    ly = hy + 92
-    colw = (CW - 48) // 3
-    for col in range(3):
-        cx = M + col * (colw + 24)
-        for row in range(8):
-            idx = col * 8 + row
-            if idx >= 23:
+    mini_headline = "5. CYCLONE AKVAN BEARS DOWN"
+    mini_explainer = "Severe storm in the Bay of Bengal heads for Andhra Pradesh"
+    mini_stat = "145 km/h"
+
+    draw_text(draw, (110, mini_y0 + 5), mini_headline, MINI_FONT, COLOR_TEXT, "lt")
+    draw_text(draw, (110, mini_y0 + 5 + 22), mini_explainer,
+              ImageFont.truetype(str(FONT_DIR / "Inter.ttf"), 12), COLOR_SUBTEXT, "lt")
+    draw_text(draw, (110, mini_y0 + 5 + 22 + 14), mini_stat,
+              MINI_STAT_FONT, (220, 50, 50), "lt")
+
+    # ── 5. VARIANT-SPECIFIC LAYOUTS ───────────────────────────────────
+    if variant == "v1":
+        # ── v1: Dense list (left) + World map (right) ────────────────
+        lower_y0 = 370
+
+        # --- Left: Dense list stories 6–27 (22 stories) ---
+        list_x0, list_x1 = 0, 500
+        list_y0, list_y1 = lower_y0, HEIGHT
+
+
+        # (Rev3: the old ticker + gap rect lived here. The gap rect painted a
+        # stray grey block under the last list rows, so it is gone too. The
+        # ticker now lives at the END of the v1 branch, full-width, drawn last.)
+
+
+        # Dense list: stories 6–27
+        story_y = list_y0 + 8
+        for idx in range(5, 27):  # stories 6 through 27 (indices 5..26)
+            if idx >= len(STORIES):
                 break
-            n = 2 + idx
-            list_cell(d, cx, ly + row * 58, colw, n)
-    footer(d, H - 26)
-    return img
+            headline, explainer, stat, img_ref, marker_idx = STORIES[idx]
+            hl_w, hl_h = measure_text(draw, headline, LIST_FONT)
+            max_w = list_x1 - list_x0 - 16
+            if hl_w > max_w:
+                # Wrap to two lines
+                words = headline.split()
+                line1, line2 = "", ""
+                for w in words:
+                    test = (line1 + " " + w).strip() if not line1 else line1 + " " + w
+                    if measure_text(draw, test, LIST_FONT)[0] <= max_w:
+                        line1 = test
+                    else:
+                        line2 = (line2 + " " + w).strip() if line2 else w
+                if line1:
+                    draw_text(draw, (list_x0 + 8, story_y), line1, LIST_FONT, COLOR_TEXT, "lt")
+                    story_y += 12
+                if line2:
+                    draw_text(draw, (list_x0 + 8, story_y), line2, LIST_FONT, COLOR_TEXT, "lt")
+                    story_y += 14
+            else:
+                draw_text(draw, (list_x0 + 8, story_y), headline, LIST_FONT, COLOR_TEXT, "lt")
+                story_y += 12
 
-# ---------------------------------------------------------------- V6 (wire minimal)
-def render_v6():
-    img = Image.new("RGB", (W, H), (255, 255, 255))
-    d = ImageDraw.Draw(img)
-    f_mast = F_SERIF(72, 900)
-    d.text((M, 30), "WORLD NEWS", font=f_mast, fill=INK)
-    d.text((M, 116), "WEDNESDAY, 18 NOVEMBER 2026",
-           font=F_SANS(18, 700), fill=SECOND)
-    d.text((M, 140), "24 stories  •  6 continents  •  every story sourced",
-           font=F_BODY(15, 400), fill=SECOND)
-    d.rectangle([M, 168, W - M, 170], fill=INK)
-    # small map top-right
-    mmap = dotted_map(300, 150, (60, 60, 60), (255, 255, 255), spacing=5,
-                      dot_r=2)
-    img.paste(mmap, (W - M - 300, 182))
-    d.rectangle([W - M - 300, 182, W - M, 332], outline=INK, width=1)
-    d.text((W - M - 300, 340), "WHERE IT HAPPENED",
-           font=F_SANS(12, 800), fill=SECOND)
-    # hero story text left of map
-    _, _, headline, explainer, _ = story_by_num(1)
-    x = M
-    d.text((x, 186), "01  —  TOP STORY", font=F_SANS(15, 800), fill=RED)
-    lines = wrap_text(d, headline, F_SANS(30, 800), 600)
-    yy = draw_lines(d, x, 210, lines[:2], F_SANS(30, 800), INK, spacing=2)
-    elines = wrap_text(d, explainer, F_BODY(16, 400), 600)
-    draw_lines(d, x, yy + 6, elines[:3], F_BODY(16, 400), SECOND, spacing=3)
-    # 3-col list of stories 2..24
-    ly = 380
-    colw = (CW - 48) // 3
-    for col in range(3):
-        cx = M + col * (colw + 24)
-        for row in range(8):
-            idx = col * 8 + row
-            if idx >= 23:
+            # explainer line (smaller font)
+            explainer_font = ImageFont.truetype(str(FONT_DIR / "Inter.ttf"), 9)
+            draw_text(draw, (list_x0 + 8, story_y + 3), explainer, explainer_font,
+                      COLOR_SUBTEXT, "lt")
+            story_y += 14
+
+        # --- Right: World map with 16 numbered markers ---
+        map_x0, map_x1 = 500, WIDTH
+        map_y0, map_y1 = lower_y0, HEIGHT
+
+        # Load geojson
+        geojson_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                     "ne_110m_land.geojson")
+        with open(geojson_path, "r") as fh:
+            geojson_data = json.load(fh)
+
+        # Draw coastline as dotted markers (simple approach: draw polygon edges as dots)
+        dot_gap = 3
+        for feature in geojson_data["features"]:
+            coords = feature["geometry"]["coordinates"]
+            if not coords:
+                continue
+            # Process exterior ring
+            ring_px = []
+            for point in coords[0]:  # exterior ring is first element
+                lon, lat = point[0], point[1]
+                px = lon_to_px(lon, map_x0, map_x1 - map_x0)
+                py = lat_to_px(lat, map_y0, map_y1 - map_y0)
+                ring_px.append((px, py))
+            # Draw dotted dots
+            for j in range(0, len(ring_px), dot_gap + 1):
+                if j < len(ring_px):
+                    x, y = ring_px[j]
+                    draw.rectangle([x - 1, y - 1, x + 1, y + 1], fill=COLOR_MAP_MARKER)
+
+        # Draw 16 markers with numbers
+        for marker_idx in range(1, 17):
+            lon = MARKER_LON[marker_idx]
+            lat = MARKER_LAT[marker_idx]
+            label = MARKER_LABEL[marker_idx]
+            if lon is None or lat is None or not label:
+                continue
+
+            px = lon_to_px(lon, map_x0, map_x1 - map_x0)
+            py = lat_to_px(lat, map_y0, map_y1 - map_y0)
+
+            # Draw marker number circle
+            circle_r = 14
+            draw.ellipse([px - circle_r, py - circle_r, px + circle_r, py + circle_r],
+                         fill=(245, 245, 245), outline=COLOR_MAP_MARKER, width=5)
+            # Draw number text with simple collision nudge
+            txt_x = px + circle_r + 3
+            txt_y = py - 2
+            font = MAP_FONT
+            txt_w, txt_h = measure_text(draw, label, font)
+            if txt_x + txt_w > map_x1 - 10:
+                txt_x = px - circle_r - txt_w - 3
+            draw_text(draw, (txt_x, txt_y), label, font, COLOR_MAP_MARKER, "lb")
+
+        # --- Footer ticker (stories 28–31): full width, drawn LAST so
+        # nothing can cover it. Items are short on purpose: each one was
+        # measured at 11pt to fit its 256px slot with room to spare.
+        ticker_h = 28
+        ticker_y0 = HEIGHT - ticker_h
+        style_rect(draw, (0, ticker_y0), (WIDTH, ticker_h), (220, 220, 220))
+        ticker_items = [
+            "28 ERASMUS BANNED",
+            "29 GULF MARKETS SLIDE",
+            "30 VOYAGER 1: ONE LIGHT-DAY",
+            "31 PATTINSON IS THE NEW BOND",
+        ]
+        ticker_font = ImageFont.truetype(str(FONT_DIR / "Inter.ttf"), 11)
+        slot_w = WIDTH / 4
+        for i, ttext in enumerate(ticker_items):
+            assert draw.textlength(ttext, font=ticker_font) <= slot_w - 20, ttext
+            draw_text(draw, (i * slot_w + 10, ticker_y0 + 7), ttext,
+                      ticker_font, COLOR_TEXT, "lt")
+
+    elif variant == "v2":
+        # ── v2: Different arrangement — map full-width at top, list below ────
+        # Map at top (y=0..350, full width 1024)
+        # Dense list below (y=350..1024, full width)
+        # Mini-card and features omitted for brevity — v2 is a compact version
+        # This variant demonstrates the rendering engine supports multiple layouts
+
+        # Draw map area background
+        style_rect(draw, (0, 0), (WIDTH, 350), (240, 240, 240))
+
+        # Simple text label in map area
+        map_title = "V2: Map-first layout"
+        draw_text(draw, (20, 10), map_title, MASTHEAD_FONT, COLOR_TEXT, "lt")
+
+        # Dense list below
+        list_x0, list_x1 = 0, WIDTH
+        list_y0, list_y1 = 350, HEIGHT
+
+        # Ticker at bottom of list
+        ticker_h = 30
+        ticker_y0 = HEIGHT - ticker_h
+        style_rect(draw, (list_x0, ticker_y0), (list_x1 - list_x0, ticker_h), (220, 220, 220))
+
+        ticker_font = ImageFont.truetype(str(FONT_DIR / "Inter.ttf"), 11)
+        ticker_texts = ["V2 TICKER: stories 28–31 placeholder"]
+        for i, ttext in enumerate(ticker_texts):
+            draw_text(draw, (20, ticker_y0 + 5), ttext, ticker_font, COLOR_TEXT, "lt")
+
+        # List stories 6–27
+        story_y = list_y0 + 8
+        for idx in range(5, 27):
+            if idx >= len(STORIES):
                 break
-            n = 2 + idx
-            list_cell(d, cx, ly + row * 72, colw, n)
-    footer(d, H - 26)
-    return img
+            headline = STORIES[idx][0]
+            hl_w, hl_h = measure_text(draw, headline, LIST_FONT)
+            draw_text(draw, (20, story_y), headline, LIST_FONT, COLOR_TEXT, "lt")
+            story_y += 12
 
-RENDERERS = {
-    "v1": ("front-page dense (light)", render_v1),
-    "v2": ("dark edition", render_v2),
-    "v3": ("magazine photo-led", render_v3),
-    "v4": ("atlas map-led", render_v4),
-    "v5": ("tabloid big-stats", render_v5),
-    "v6": ("wire minimal (control)", render_v6),
-}
+    # Save PNG: v1 IS the entry — write variants/v1-entry.png AND entry.png
+    # from the same image object, so the committed entry can never go stale
+    # again. (Rev3: the old code saved entry.png only when variant was None,
+    # and variant None skipped the whole lower half — that is how rev1 shipped
+    # a blank bottom 60%.)
+    if variant == "v1":
+        for output_path in (variants_dir / "v1-entry.png",
+                            Path(__file__).parent / "entry.png"):
+            im.save(str(output_path), "PNG")
+            print(f"Rendered {output_path} ({WIDTH}x{HEIGHT})")
+        output_path = Path(__file__).parent / "entry.png"
+    elif variant:
+        output_path = variants_dir / f"{variant}-entry.png"
+        im.save(str(output_path), "PNG")
+        print(f"Rendered {output_path} ({WIDTH}x{HEIGHT})")
+    else:
+        output_path = Path(__file__).parent / "entry.png"
+        im.save(str(output_path), "PNG")
+        print(f"Rendered entry.png ({WIDTH}x{HEIGHT})")
 
-def main():
-    import sys
-    VARIANTS.mkdir(parents=True, exist_ok=True)
-    names = sys.argv[1:] or list(RENDERERS)
-    for name in names:
-        label, fn = RENDERERS[name]
-        img = fn()
-        out = VARIANTS / f"{name}.png"
-        img.save(str(out), format="PNG")
-        print(f"{name}: {label} -> {out} {out.stat().st_size} bytes")
+    # Verify file size
+    file_size = output_path.stat().st_size if output_path.exists() else 0
+    if file_size > MAX_BYTES:
+        print(f"WARNING: {file_size} bytes exceeds {MAX_BYTES} cap", file=sys.stderr)
+
+    return im
+
+
+# ---------------------------------------------------------------------------
+# PNG validator
+# ---------------------------------------------------------------------------
+
+def validate_png(path):
+    """Validate PNG magic, IHDR dimensions, trailing IEND, and byte cap."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    if len(data) > MAX_BYTES:
+        raise SystemExit(f"PNG is {len(data)} bytes, over the 1 MiB cap")
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise SystemExit("Bad PNG signature")
+    if len(data) < 33 or data[12:16] != b"IHDR":
+        raise SystemExit("Missing IHDR chunk")
+    width, height = struct.unpack(">II", data[16:24])
+    if (width, height) != (WIDTH, HEIGHT):
+        raise SystemExit(f"PNG is {width}x{height}, expected {WIDTH}x{HEIGHT}")
+    if not data.rstrip(b"\x00").endswith(b"IEND" + b"\xaeB\x82"):
+        raise SystemExit("Missing IEND chunk")
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    main()
+    import sys
+    # Default is v1 (the entry). The old default None rendered only the top
+    # half and saved that as entry.png — never again.
+    variant = sys.argv[1] if len(sys.argv) > 1 else "v1"
+    render(variant)

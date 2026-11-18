@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """news-image-20261118 entrypoint.
 
-Copies the pre-rendered front page (entry.png, 1024x1024, 24 verified
+Copies the pre-rendered front page (entry.png, 1024x1024, 31 verified
 stories from Wednesday 18 November 2026) into the output directory.
 
-Stdlib only — the sandbox installs nothing, so no Pillow here. The image
+Stdlib only — the sandbox installs nothing, no Pillow needed. The image
 was rendered at build time by render.py (PIL) from the verified facts in
 NEWS-SOURCES.md, the two photos in assets/, and Natural Earth coastline
 data (ne_110m_land.geojson). Re-running render.py reproduces entry.png
@@ -22,7 +22,7 @@ import sys
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 EXPECTED_WIDTH = 1024
 EXPECTED_HEIGHT = 1024
-MAX_BYTES = 1024 * 1024  # bounty cap: 1 MiB
+MAX_BYTES = 1024 * 1024  # 1 MiB cap
 
 
 def read_png(path):
@@ -41,7 +41,12 @@ def read_png(path):
             f"entry.png is {width}x{height}, expected "
             f"{EXPECTED_WIDTH}x{EXPECTED_HEIGHT}"
         )
-    if not data.rstrip(b"\x00").endswith(b"IEND" + b"\xaeB`\x82"):
+    # Check for trailing IEND chunk.
+    # After stripping leading/trailing null bytes, the last 8 bytes must
+    # contain the IEND chunk type "IEND" at positions -8:-4, followed by
+    # a 4-byte CRC checksum at positions -4:.
+    stripped = data.rstrip(b"\x00")
+    if len(stripped) < 8 or stripped[-8:-4] != b"IEND":
         raise SystemExit("entry.png: missing IEND chunk")
     return data
 

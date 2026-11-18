@@ -25,7 +25,7 @@ Numbers and names are copied from the sources, not from memory.
    Sources: BBC 17 Nov 21:24; The Hear UK archive.
 3. NVIDIA Q3 REVENUE +103% — "Bumper results — but Huang will NOT return as CEO"
    Explainer: Strong quarterly earnings after ex-CEO Jensen Huang's exit over an affair with a suspected Chinese spy.
-   Stat: +103%
+   Stat: HUANG OUT
    Sources: BBC 17 Nov 23:03; Balanced News UK daily.
 4. TANKER HIT AGAIN IN HORMUZ — "TARA GAS struck twice; crew abandons ship"
    Explainer: Panama-flagged LPG tanker attacked 16 Nov, hit again 17 Nov; 1 Indian seafarer missing, 2 hurt, 24 rescued at Khasab.
@@ -35,6 +35,15 @@ Numbers and names are copied from the sources, not from memory.
    Explainer: Landfall forecast 20 Nov between Nellore and Tuni as a very severe storm; orange alert for Andhra + south Odisha.
    Stat: 145 km/h
    Sources: IMD National Bulletin No. 14, 17 Nov; The Watchers.
+
+## MAP MARKERS (lon, lat)
+Manila 121.0, 14.6 | Crimea 34.0, 45.3 | Kyiv 30.5, 50.4 | Hormuz 56.3, 26.5 |
+Bay of Bengal 85.7, 12.2 | Shenzhen 114.1, 22.5 | London -0.1, 51.5 |
+Chennai 80.3, 13.1 | Dhaka 90.4, 23.8 | New Delhi 77.2, 28.6 |
+Washington -77.0, 38.9 | Kemerovo 86.1, 55.4 | Jerusalem 35.2, 31.8 |
+Madrid -3.7, 40.4 | Badme 37.9, 14.7 | Pretoria 28.2, -25.7 |
+
+## DENSE LIST + TICKER
 6. CANADA–CHINA TRADE THAW — "Xi meets Carney: tariff relief for C$400M of exports"
    Explainer: China cuts tariffs on pork and seafood; Canada extends steel and aluminium remission by two years.
    Stat: $280M
@@ -112,9 +121,40 @@ Numbers and names are copied from the sources, not from memory.
     Stat: CHARGED
     Sources: BBC 17 Nov 22:44.
 
-## MAP MARKERS (lon, lat)
+## NEW STORIES (25–31)
+25. US–IRAN GULF STRIKES — "US hits Qeshm missile site; Iran fires at Bahrain and Kuwait"
+    Explainer: US jets struck a Revolutionary Guard missile site on Qeshm Island; Iran fired drones at Bahrain and Kuwait in reply.
+    Stat: QESHM STRUCK
+    Sources: Reuters 18 Nov (Gulf bourses + podcast "Nvidia snubs Huang, Chinese AI and GTA VI"); One Turn 18 Nov (18 outlets: Japan Times, CBS, Al Jazeera).
+26. BANGLADESH UNREST GROWS — "Paramilitary deployed as Hasina return sparks clashes"
+    Explainer: Hundreds of paramilitary troops deployed nationwide; bomb blasts and arson blamed on Awami League supporters.
+    Stat: 71 ARRESTED
+    Sources: Reuters 18 Nov ("Bangladesh deploys paramilitary as unrest grows over Hasina's return").
+27. ETHIOPIA–ERITREA BUILD-UP — "Forces mass along border, war fears rise"
+    Explainer: Both armies massed along the shared border; artillery clashes reported near Badme, monitors ACLED and ICG warn of wider war.
+    Stat: BADME CLASHES
+    Sources: Reuters 18 Nov ("Ethiopia and Eritrea amass forces along border, heightening war fears, sources say").
+28. ERASMUS BANNED SIX TESTS — "World Rugby suspends Springbok coach"
+    Explainer: South Africa head coach Rassie Erasmus suspended for six Tests over match-fixing comments.
+    Stat: 6 TESTS
+    Sources: iqmia Global News Summary 2026-11-18; NB News Wrap 18 Nov (sources BBC, Reuters).
+29. GULF MARKETS SLIDE — "Stocks fall as US–Iran fighting escalates"
+    Explainer: Gulf bourses down in early trade; Brent crude $91.69, down 1.6%, as shipping through Hormuz is disrupted.
+    Stat: BRENT $91.69
+    Sources: Reuters 18 Nov ("Most Gulf bourses fall as US-Iran hostilities escalate").
+30. VOYAGER 1: ONE LIGHT-DAY — "NASA probe reaches mega-distance milestone"
+    Explainer: Voyager 1 reaches one light-day from Earth; NASA marks it with a 'Shine Bright' public tribute.
+    Stat: 1 LIGHT-DAY
+    Sources: Reuters podcast 18 Nov ("NASA's Voyager 1 probe poised to achieve mega-distance milestone"); Times of India 18 Nov.
+31. PATTINSON IS THE NEW BOND — "Robert Pattinson named 7th James Bond"
+    Explainer: Robert Pattinson named the new James Bond, replacing Daniel Craig.
+    Stat: 7TH BOND
+    Sources: The Hindu 18 Nov 10:52 (via Newsmriti top-10 18 Nov).
+
+## ALL MAP MARKERS (lon, lat) — 16 total
 Manila 121.0, 14.6 | Crimea 34.0, 45.3 | Kyiv 30.5, 50.4 | Hormuz 56.3, 26.5 |
 Bay of Bengal 85.7, 12.2 | Shenzhen 114.1, 22.5 | London -0.1, 51.5 |
 Chennai 80.3, 13.1 | Dhaka 90.4, 23.8 | New Delhi 77.2, 28.6 |
 Washington -77.0, 38.9 | Kemerovo 86.1, 55.4 | Jerusalem 35.2, 31.8 |
-Madrid -3.7, 40.4 | Mumbai 72.9, 19.1 | Mexico City -99.1, 19.4
+Madrid -3.7, 40.4 | Badme 37.9, 14.7 | Pretoria 28.2, -25.7
+RECOMMENDED: 16 markers (14 original + Badme + Pretoria)
