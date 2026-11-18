@@ -239,8 +239,9 @@ def dotted_map(w, h, dot_color, bg_color, marker_color=(193, 18, 31),
                           fill=dot_color)
     if markers:
         # nudge the India cluster apart (markers would pile)
-        nudges = {"8": (0, 11), "9": (12, -5), "10": (-11, -9),
-                  "20": (-13, 7), "6": (9, 0)}
+        nudges = {"4": (15, -3), "5": (-25, -25), "6": (-15, 0),
+                  "8": (0, 30), "9": (35, -10), "10": (-45, -12),
+                  "14": (25, 20), "2": (20, -8), "20": (-30, 10)}
         for lon, lat, num in MARKERS:
             x, y = project(lon, lat, w, h)
             dx, dy = nudges.get(num, (0, 0))
