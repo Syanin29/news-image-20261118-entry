@@ -158,3 +158,48 @@ Chennai 80.3, 13.1 | Dhaka 90.4, 23.8 | New Delhi 77.2, 28.6 |
 Washington -77.0, 38.9 | Kemerovo 86.1, 55.4 | Jerusalem 35.2, 31.8 |
 Madrid -3.7, 40.4 | Badme 37.9, 14.7 | Pretoria 28.2, -25.7
 RECOMMENDED: 16 markers (14 original + Badme + Pretoria)
+
+## MORE STORIES (32–38) — density rebuild, verified 19 Nov 2026 ~10:00 WITA
+Seven more stories, all reported 18 Nov 2026 by a major outlet. They lift
+the entry from 31 to 38 stories (top-10 live ni18: 31–41 stories + map).
+
+32. FORD'S FIRST CATL-TECH CELLS — "Michigan plant ships first LFP cells for Fathom EV truck"
+    Explainer: Ford starts producing lower-cost battery cells at a new Michigan plant for its Fathom midsize electric truck, using technology licensed from China's CATL; 40 cells a minute.
+    Stat: 40/MIN
+    Sources: Reuters 18 Nov ("Ford ships first battery cells using CATL technology").
+33. ANTHROPIC IPO PRICED — "Shares priced today; trading starts tomorrow as ANT"
+    Explainer: Anthropic priced its shares on Wednesday, with trading set to start Thursday on the Nasdaq under ticker ANT.
+    Stat: TICKER ANT
+    Sources: Investopedia Markets News, Nov. 18, 2026.
+34. DOW −560; GOLD, BITCOIN SLIDE — "Risk-off rout: Dow sheds 560, gold hits 14-month low"
+    Explainer: Dow falls 1.1% (~560 points), S&P 500 extends its losing streak to five sessions; gold futures drop 3.5% to $3,730 an ounce, Bitcoin slides to $62,300.
+    Stat: DOW −560
+    Sources: Investopedia Markets News, Nov. 18, 2026; eOption Market Review 18 Nov 2026.
+35. FED'S WALLER: 'SHOCK' HIKE — "Fed governor says central bank may need half-point hike"
+    Explainer: Fed Governor Christopher Waller says the central bank may need to "shock people" with a half-point rate hike; traders price ~96% odds of a December hike.
+    Stat: 96% ODDS
+    Sources: CNBC via Investopedia Markets News 18 Nov 2026; FXStreet 18 Nov 2026.
+36. GTA VI SCORES 99/100 — "Reviews land at 99 on Metacritic; New Zealand plays first at 11:00 UTC"
+    Explainer: Grand Theft Auto VI reviews land at 99/100 on Metacritic ahead of the 19 Nov launch; New Zealand unlocks first at 11:00 UTC on 18 Nov, Singapore at 16:00 UTC.
+    Stat: 99/100
+    Sources: Radio Times 18 Nov 11:43 ("GTA 6 review round-up: Metacritic 99"); AFP via TechXplore 18 Nov 2026; Rockstar/PlayStation unlock times.
+37. BLAVATNIK'S $5B SPACEX STAKE — "Billionaire builds $5 billion stake in SpaceX"
+    Explainer: British American billionaire Len Blavatnik has built a $5 billion stake in Elon Musk's SpaceX, Bloomberg reports; his Access Industries has invested in SpaceX since 2020.
+    Stat: $5B STAKE
+    Sources: Reuters 18 Nov 20:54 UTC ("Billionaire Blavatnik takes $5 billion SpaceX stake, Bloomberg reports").
+38. VULCAN FAILURE: FUEL STARVED — "ULA: fuel shortage, not engines, doomed 40 Leo satellites"
+    Explainer: ULA says preliminary findings show Vulcan's two BE-4 engines did not get enough fuel during Sunday's failed launch, which lost 40 Amazon Leo satellites; the engines themselves performed fine.
+    Stat: 40 LOST
+    Sources: GeekWire 18 Nov 10:01 ("Latest findings point to fuel supply, not Blue Origin's engines, in loss of Amazon Leo satellites").
+
+## UTC TIMELINE (18 Nov 2026 — strip at the bottom of the image)
+- ~06:00 Gulf bourses open lower in early trade (Reuters: "Most Gulf bourses fall", early trade)
+- 11:00 GTA VI unlocks in New Zealand, first players worldwide (Rockstar/PlayStation: 11:00 GMT)
+- 16:00 GTA VI unlocks in Singapore at local midnight (PlayStation: midnight local = 16:00 UTC)
+- 19:00 FOMC minutes due, 2:00 p.m. ET (Investopedia/FXStreet: minutes of the 27–28 Oct meeting)
+- 20:54 Reuters reports Blavatnik's $5B SpaceX stake (Reuters timestamp 20:54:55 UTC)
+
+## DAY IN NUMBERS (counted from this entry itself)
+38 stories | 6 continents | 15 places mapped | 2 photos | 24 hours in UTC
+New stories 32–38 all map to marker 11 (Washington/US); no new markers were
+added, so the map keeps its 16 markers and the US circles do not pile up.
