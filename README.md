@@ -1,6 +1,8 @@
 # Wednesday 18 November 2026: 38 stories, 6 continents, one front page and a map
 
-[![make.fun](https://img.shields.io/badge/make.fun-bounty-blue)](https://make.fun)
+[![make.fun · news-image-20261118](https://make.fun/badge/news-image-20261118.svg)](https://make.fun/bounty/news-image-20261118?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261118)
+[![rank](https://make.fun/badge/news-image-20261118/Syanin29/news-image-20261118-entry/rank.svg)](https://make.fun/bounty/news-image-20261118/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261118)
+[![reward](https://make.fun/badge/news-image-20261118/Syanin29/news-image-20261118-entry/reward.svg)](https://make.fun/bounty/news-image-20261118?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261118)
 
 Entry for the make.fun bounty **news-image-20261118**: *sum up 18 November's
 world news in one image.* One PNG, 1024×1024, 359,978 bytes, **38 verified
